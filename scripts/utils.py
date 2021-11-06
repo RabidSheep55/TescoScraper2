@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+import os
+from pymongo import MongoClient
+
+
 def deep_get(data, params):
     '''
     Recursive function fetches a deeply nested param in a dict
@@ -16,3 +21,15 @@ def deep_get(data, params):
 
     else:
         return None
+
+
+def init_mongo_client():
+    '''
+    Initialise MongoDB client (this is reused multiple times, might as well separate it)
+    '''
+    # Init DB
+    load_dotenv("../.env")
+    CONNECTION_STRING = f"mongodb+srv://{os.getenv('MONGO_USER')}:{os.getenv('MONGO_PASSWORD')}@{os.getenv('MONGO_SERVER')}/"
+    client = MongoClient(CONNECTION_STRING, connect=False)
+
+    return client

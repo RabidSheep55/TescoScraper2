@@ -1,14 +1,10 @@
-from utils import deep_get
+from utils import deep_get, init_mongo_client
 
 import requests as rq
 
 from bs4 import BeautifulSoup
 import lxml
 import orjson
-
-from dotenv import load_dotenv
-import os
-from pymongo import MongoClient
 
 import numpy as np
 import concurrent.futures
@@ -32,7 +28,8 @@ def fetch_products(page, count):
         "https://www.tesco.com/groceries/en-GB/promotions/alloffers",
         params=params,
         headers=headers,
-        timeout=20)
+        timeout=10)
+
     return res.content
 
 
@@ -91,7 +88,7 @@ def get_products_and_upload(page, count):
 
     # If we want to upsert, we have to loop
     for product in products:
-        db["products"].update_one({"product.id": product["product"]["id"]},
+        db["products"].update_one({"product.gtin": product["product"]["gtin"]},
                                   {"$set": product},
                                   upsert=True)
 
@@ -103,11 +100,11 @@ def get_n_products(n):
     Retrieve n products in parallel (will upload to MongoDB)
     '''
     # Number of items to load per page (determined by scripts in optimize.py)
-    OPTIMUM_BATCH = 60
+    OPTIMUM_BATCH = 256
 
     # Construct a list of (page, count) up the amount of products requested
     pages = np.arange(1, np.ceil(n / OPTIMUM_BATCH) + 1, dtype=int)
-    counts = pages * OPTIMUM_BATCH
+    counts = np.full_like(pages, OPTIMUM_BATCH)
     counts[-1] = n % OPTIMUM_BATCH or OPTIMUM_BATCH
 
     print(
@@ -116,7 +113,7 @@ def get_n_products(n):
 
     # Request them in parallel
     with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(30, len(pages))) as executor:
+            max_workers=min(20, len(pages))) as executor:
         results = list(
             tqdm(
                 executor.map(
@@ -127,16 +124,17 @@ def get_n_products(n):
                 total=len(pages),
             ))
 
-    print("\nSUMMARY:")
-    for i, result in enumerate(results):
-        print(f"\t[{i+1}/{len(pages)}] (count={counts[i]}) {result}")
+    res = list(set(results))
+    if len(res) == 1 and res[0] == "Success":
+        print("All products fetched successfully")
+    else:
+        print("\nAn error occured, SUMMARY:")
+        for i, result in enumerate(results):
+            print(f"\t[{i+1}/{len(pages)}] (count={counts[i]}) {result}")
 
 
 if __name__ == "__main__":
-    # Init DB
-    load_dotenv("../.env")
-    CONNECTION_STRING = f"mongodb+srv://{os.getenv('MONGO_USER')}:{os.getenv('MONGO_PASSWORD')}@{os.getenv('MONGO_SERVER')}/"
-    client = MongoClient(CONNECTION_STRING, connect=False)
+    client = init_mongo_client()
     db = client['test']
 
     n = get_total_products()
